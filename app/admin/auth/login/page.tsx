@@ -54,10 +54,6 @@ export default function AdminLoginPage() {
                 return;
             }
 
-            localStorage.setItem('admin', data.data.username);
-
-            window.dispatchEvent(new Event('admin-auth-change'));
-
             showToast('Successfully logged in as admin!', 'success');
 
             setLoading(false);

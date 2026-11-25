@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAdminSession } from '@/hooks/useAdminSession';
+import useAdminSession from '@/hooks/useAdminSession';
 
 interface LeaderboardUser {
     username: string;
@@ -13,75 +13,101 @@ interface LeaderboardUser {
 export default function AdminPage() {
     const router = useRouter();
 
-    const { admin, isLoading: isCheckingSession } = useAdminSession();
+    const {
+        admin,
+        isLoading: isSessionLoading,
+        error: sessionError,
+    } = useAdminSession();
 
     const [users, setUsers] = useState<LeaderboardUser[]>([]);
     const [scoreEdits, setScoreEdits] = useState<Record<string, string>>({});
-    const [isLoading, setIsLoading] = useState(true);
     const [savingUser, setSavingUser] = useState<string | null>(null);
-    const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const [pageError, setPageError] = useState('');
+    const [isLoadingUsers, setIsLoadingUsers] = useState(true);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
 
     useEffect(() => {
-        if (isCheckingSession) return;
+        if (isSessionLoading || !admin) return;
 
-        if (!admin) {
-            router.replace('/admin/auth/login');
-            return;
-        }
+        let cancelled = false;
 
         const fetchLeaderboard = async () => {
+            setIsLoadingUsers(true);
+            setPageError('');
+
             try {
                 const res = await fetch('/api/leaderboard', {
+                    method: 'GET',
+                    credentials: 'same-origin',
                     cache: 'no-store',
                 });
 
                 const result = await res.json();
 
                 if (!res.ok || !result.success) {
-                    throw new Error(result.message || 'Failed to fetch leaderboard');
+                    throw new Error(
+                        result.message || 'Failed to fetch leaderboard.'
+                    );
                 }
+
+                if (!Array.isArray(result.data)) {
+                    throw new Error('Invalid leaderboard response.');
+                }
+
+                if (cancelled) return;
 
                 setUsers(result.data);
 
                 const initialScores: Record<string, string> = {};
-
                 result.data.forEach((user: LeaderboardUser) => {
                     initialScores[user.username] = String(user.score);
                 });
 
                 setScoreEdits(initialScores);
             } catch (err) {
-                setError("There's an error retrieving the leaderboard.");
+                if (!cancelled) {
+                    setPageError(
+                        err instanceof Error
+                            ? err.message
+                            : "There's an error retrieving the leaderboard."
+                    );
+                }
             } finally {
-                setIsLoading(false);
+                if (!cancelled) {
+                    setIsLoadingUsers(false);
+                }
             }
         };
 
         fetchLeaderboard();
-    }, [admin, isCheckingSession, router]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [admin, isSessionLoading]);
 
     const handleLogout = async () => {
         try {
             setIsLoggingOut(true);
+            setPageError('');
 
             const res = await fetch('/api/admin/auth/logout', {
                 method: 'POST',
-                credentials: 'include',
+                credentials: 'same-origin',
             });
 
             const result = await res.json();
 
             if (!res.ok || !result.success) {
-                throw new Error(result.message || 'Failed to logout');
+                throw new Error(result.message || 'Failed to logout.');
             }
 
             router.replace('/admin/auth/login');
             router.refresh();
         } catch (err) {
-            setError(
-                err instanceof Error ? err.message : 'Failed to logout'
+            setPageError(
+                err instanceof Error ? err.message : 'Failed to logout.'
             );
         } finally {
             setIsLoggingOut(false);
@@ -95,23 +121,25 @@ export default function AdminPage() {
         }));
 
         setSuccess('');
+        setPageError('');
     };
 
     const handleSaveScore = async (username: string) => {
-        const newScore = Number(scoreEdits[username]);
+        const scoreValue = scoreEdits[username] ?? '';
+        const newScore = Number(scoreValue);
 
         if (
-            scoreEdits[username].trim() === '' ||
+            scoreValue.trim() === '' ||
             !Number.isInteger(newScore) ||
             newScore < 0
         ) {
-            setError('Score must be a non-negative integer.');
+            setPageError('Score must be a non-negative integer.');
             return;
         }
 
         try {
             setSavingUser(username);
-            setError('');
+            setPageError('');
             setSuccess('');
 
             const res = await fetch(
@@ -121,17 +149,20 @@ export default function AdminPage() {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    credentials: 'include',
-                    body: JSON.stringify({
-                        score: newScore,
-                    }),
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ score: newScore }),
                 }
             );
 
             const result = await res.json();
 
+            if (res.status === 401) {
+                router.replace('/admin/auth/login');
+                return;
+            }
+
             if (!res.ok || !result.success) {
-                throw new Error(result.message || 'Failed to update score');
+                throw new Error(result.message || 'Failed to update score.');
             }
 
             setUsers((prev) =>
@@ -144,7 +175,7 @@ export default function AdminPage() {
 
             setSuccess(`Successfully updated ${username}'s score.`);
         } catch (err) {
-            setError(
+            setPageError(
                 err instanceof Error ? err.message : 'Failed to update score.'
             );
         } finally {
@@ -152,10 +183,18 @@ export default function AdminPage() {
         }
     };
 
-    if (isCheckingSession || (admin && isLoading)) {
+    if (isSessionLoading) {
         return (
             <div className="flex flex-1 items-center justify-center bg-zinc-50 dark:bg-lighter_black p-4">
                 <p className="text-gray-400">Loading admin dashboard...</p>
+            </div>
+        );
+    }
+
+    if (sessionError) {
+        return (
+            <div className="flex flex-1 items-center justify-center bg-zinc-50 dark:bg-lighter_black p-4">
+                <p className="text-center text-red-500">{sessionError}</p>
             </div>
         );
     }
@@ -171,7 +210,6 @@ export default function AdminPage() {
     return (
         <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 dark:bg-lighter_black p-4">
             <div className="flex flex-col gap-5 bg-black rounded-xl w-full max-w-[550px] p-6 md:p-8">
-
                 <div className="flex flex-col items-center gap-2">
                     <h1 className="text-3xl font-bold text-purple">
                         Admin Dashboard
@@ -187,10 +225,9 @@ export default function AdminPage() {
                 </div>
 
                 <div className="flex flex-col gap-3">
-
-                    {error && (
+                    {pageError && (
                         <p className="text-center text-sm text-red-500">
-                            {error}
+                            {pageError}
                         </p>
                     )}
 
@@ -200,7 +237,11 @@ export default function AdminPage() {
                         </p>
                     )}
 
-                    {users.length === 0 ? (
+                    {isLoadingUsers ? (
+                        <p className="text-center text-gray-400 py-8">
+                            Loading players...
+                        </p>
+                    ) : users.length === 0 ? (
                         <p className="text-center text-gray-400 py-8">
                             No players found.
                         </p>
@@ -231,31 +272,37 @@ export default function AdminPage() {
                                             step="1"
                                             value={scoreEdits[player.username] ?? ''}
                                             onChange={(e) =>
-                                                handleScoreChange(player.username, e.target.value)
+                                                handleScoreChange(
+                                                    player.username,
+                                                    e.target.value
+                                                )
                                             }
                                             className="w-20 bg-black border border-zinc-700 focus:border-purple rounded-lg px-2 py-2 text-center text-purple font-bold outline-none"
                                         />
 
                                         <button
                                             onClick={() => handleSaveScore(player.username)}
-                                            disabled={!isChanged || savingUser === player.username}
+                                            disabled={
+                                                !isChanged || savingUser === player.username
+                                            }
                                             className="bg-purple text-black px-3 py-2 rounded-lg text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
-                                            {savingUser === player.username ? 'Saving...' : 'Save'}
+                                            {savingUser === player.username
+                                                ? 'Saving...'
+                                                : 'Save'}
                                         </button>
                                     </div>
                                 </div>
                             );
                         })
                     )}
-
                 </div>
 
                 <div className="flex flex-col gap-3 mt-2">
                     <button
                         onClick={handleLogout}
                         disabled={isLoggingOut}
-                        className="w-full  text-white bg-red-800 py-2.5 rounded-lg font-bold"
+                        className="w-full text-white bg-red-800 py-2.5 rounded-lg font-bold disabled:opacity-50"
                     >
                         {isLoggingOut ? 'Logging out...' : 'Logout'}
                     </button>
