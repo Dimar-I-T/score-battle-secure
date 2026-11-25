@@ -35,11 +35,6 @@ export async function loginService({ username, password }: AuthType) {
         throw Error('incorrect password!');
     }
 
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-        throw Error('no secret key');
-    }
-
     const { password: _, ...userData } = user.rows[0];
     const payload: JWTPayload = {
         username: userData.username,

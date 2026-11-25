@@ -5,87 +5,74 @@ import { useRouter } from "next/navigation";
 import { User, SessionState } from "@/lib/types";
 
 export default function useSession(): SessionState {
+  console.log("[useSession] Hook rendered");
+
   const router = useRouter();
-  const [token, setToken] = useState<string | null>(null);
+
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const tokenFromLocal = localStorage.getItem("token");
-    if (!tokenFromLocal) {
-      alert("Unauthorized, please login.");
-      setIsLoading(false);
-      router.push("/auth/login");
-      return;
-    }
+    console.log("[useSession] useEffect executed");
 
-    setToken(tokenFromLocal);
+    let cancelled = false;
 
     const fetchUser = async () => {
+      console.log("[useSession] Starting fetch");
+
       try {
-        const response = await fetch('/api/auth/me', {
-          method: 'GET',
-          credentials: 'include',
-          cache: 'no-store',
+        const response = await fetch("/api/auth/me", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
         });
 
-        if (response.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-
-          alert("Session has expired, please login.");
-          router.push("/auth/login");
-          return;
-        }
-
-        if (response.status === 403) {
-          const errorBody = await response.text();
-
-          console.error("Request blocked (403):", errorBody);
-
-          alert("Access forbidden or request blocked by server.");
-
-          return;
-        }
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("application/json")) {
-          const cachedUser = localStorage.getItem("user");
-          if (cachedUser) {
-            try {
-              setUser(JSON.parse(cachedUser));
-            } catch {
-            }
-          }
-          return;
-        }
+        console.log("[useSession] Response:", response.status);
 
         const result = await response.json();
 
-        if (!response.ok) {
-          const cachedUser = localStorage.getItem("user");
-          if (cachedUser) {
-            try {
-              setUser(JSON.parse(cachedUser));
-            } catch {
-            }
-          }
+        if (cancelled) return;
+
+        if (response.status === 401) {
+          localStorage.removeItem("user");
+          alert("Unauthorized, you must login!");
+          router.replace("/auth/login");
           return;
         }
 
-        if (result.data) {
-          setUser(result.data);
-          localStorage.setItem("user", JSON.stringify(result.data));
+        if (!response.ok) {
+          throw new Error(result.message || "Failed to retrieve user.");
         }
-      } catch (error) {
-        console.error("Failed to fetch data user:", error);
+
+        if (!result.success || !result.data) {
+          throw new Error("Invalid authentication response.");
+        }
+
+        setUser(result.data);
+        localStorage.setItem("user", JSON.stringify(result.data));
+
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[useSession] Error:", err);
+          setError(
+            err instanceof Error ? err.message : "Failed to retrieve user."
+          );
+        }
       } finally {
-        setIsLoading(false);
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchUser();
+
+    return () => {
+      console.log("[useSession] Cleanup");
+      cancelled = true;
+    };
   }, [router]);
 
-  return { user, isLoading, token };
+  return { user, isLoading, error };
 }
