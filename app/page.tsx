@@ -6,10 +6,24 @@ import { useRouter } from "next/navigation";
 import useSession from "@/hooks/useSession";
 
 export default function Home() {
-  const { user, isLoading } = useSession();
+  const { user, isLoading, error } = useSession();
   const [score, setScore] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-red-500">
+        {error}
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   const showToast = (message: string, type: 'success' | 'error') => {
     const toast = document.createElement('div');
@@ -63,8 +77,6 @@ export default function Home() {
       showToast("There's an error in the server.", 'error');
     }
   }
-
-  if (isLoading) return <div>Loading...</div>;
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 dark:bg-lighter_black">
