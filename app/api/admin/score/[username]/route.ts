@@ -1,37 +1,70 @@
-import { getAdminSession } from "@/lib/admin/auth";
-import { setScoreService } from "@/services/scoreService";
 import { NextRequest, NextResponse } from "next/server";
+import { getAdminSession } from "@/lib/adminSession";
+import { pool } from "@/lib/db/config";
 
-interface RouteParams {
-    params: Promise<{
-        username: string;
-    }>;
-}
-
-
-export async function PUT(req: NextRequest, { params }: RouteParams) {
+export async function PUT(
+    req: NextRequest,
+    context: { params: Promise<{ username: string }> }
+) {
     try {
-        const { username } = await params;
-        const { score } = await req.json();
         const admin = await getAdminSession();
 
         if (!admin) {
-            return NextResponse.json({
-                success: false,
-                message: "Unauthorized"
-            }, { status: 401 });
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Unauthorized.",
+                },
+                { status: 401 }
+            );
         }
 
-        const result = await setScoreService(username, score);
+        const { username } = await context.params;
+        const { score } = await req.json();
+
+        if (!Number.isInteger(score) || score < 0) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "Invalid score.",
+                },
+                { status: 400 }
+            );
+        }
+
+        const result = await pool.query(
+            `UPDATE users
+             SET score = $1
+             WHERE username = $2
+             RETURNING username, score`,
+            [score, username]
+        );
+
+        if (result.rowCount === 0) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    message: "User not found.",
+                },
+                { status: 404 }
+            );
+        }
+
         return NextResponse.json({
             success: true,
-            message: "Successfully updated user's score",
-            data: result
-        }, { status: 200 });
-    } catch (error: any) {
-        return NextResponse.json({
-            success: false,
-            message: error.message
-        }, { status: 500 })
+            message: "Score successfully updated.",
+            data: result.rows[0],
+        });
+
+    } catch (error) {
+        console.error("Admin score update error:", error);
+
+        return NextResponse.json(
+            {
+                success: false,
+                message: "Internal server error.",
+            },
+            { status: 500 }
+        );
     }
 }

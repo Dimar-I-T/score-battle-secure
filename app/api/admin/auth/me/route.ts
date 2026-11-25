@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getAdminSession } from '@/lib/admin/auth';
+import { NextResponse } from "next/server";
+import { getAdminSession } from "@/lib/adminSession";
 
 export async function GET() {
   try {
@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json(
         {
           success: false,
-          message: 'Unauthorized',
+          message: "Unauthorized. Admin login required.",
         },
         { status: 401 }
       );
@@ -17,18 +17,17 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      data: {
-        username: admin.username,
-        role: admin.role,
-      },
+      message: "Successfully retrieved admin session.",
+      data: admin,
     });
+
   } catch (error) {
-    console.error('Admin session error:', error);
+    console.error("Admin session error:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message: 'Failed to verify admin session',
+        message: "Internal server error.",
       },
       { status: 500 }
     );

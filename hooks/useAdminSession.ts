@@ -1,61 +1,86 @@
-'use client';
+"use client";
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface Admin {
   username: string;
   role: string;
 }
 
-interface AdminSessionResult {
+interface AdminSessionState {
   admin: Admin | null;
   isLoading: boolean;
-  error: string;
-  refreshSession: () => Promise<void>;
+  error: string | null;
 }
 
-export function useAdminSession(): AdminSessionResult {
+export default function useAdminSession(): AdminSessionState {
+  const router = useRouter();
+
   const [admin, setAdmin] = useState<Admin | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const refreshSession = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError('');
-
-      const res = await fetch('/api/admin/auth/me', {
-        method: 'GET',
-        credentials: 'include',
-        cache: 'no-store',
-      });
-
-      const result = await res.json();
-
-      if (!res.ok || !result.success) {
-        setAdmin(null);
-        throw new Error(result.message || 'Unauthorized');
-      }
-
-      setAdmin(result.data);
-    } catch (err) {
-      setAdmin(null);
-      setError(
-        err instanceof Error ? err.message : 'Failed to verify admin session'
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    refreshSession();
-  }, [refreshSession]);
+    let cancelled = false;
 
-  return {
-    admin,
-    isLoading,
-    error,
-    refreshSession,
-  };
+    const fetchAdmin = async () => {
+      try {
+        const response = await fetch("/api/admin/auth/me", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+
+        const result = await response.json();
+
+        if (cancelled) return;
+
+        if (response.status === 401) {
+          setAdmin(null);
+          router.replace("/admin/login");
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            result.message || "Failed to retrieve admin session."
+          );
+        }
+
+        if (!result.success || !result.data) {
+          throw new Error("Invalid admin session response.");
+        }
+
+        if (result.data.role !== "admin") {
+          setAdmin(null);
+          router.replace("/admin/login");
+          return;
+        }
+
+        setAdmin(result.data);
+
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to retrieve admin session."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchAdmin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  return { admin, isLoading, error };
 }
